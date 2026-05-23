@@ -45,7 +45,7 @@ void Malta2TreeWriterModule::initialize() {
       std::string det_name = detector->getName();
       
       std::ostringstream ss;
-      ss << "run_" << std::setw(6) << std::setfill('0') << run_number_ << "_" << plane_index;
+      ss << "run_" << std::setw(6) << std::setfill('0') << run_number_ << "_" << plane_index << ".root";
       
       std::string file_name = createOutputFile(ss.str(), "root", true);
       auto output_file = std::make_unique<TFile>(file_name.c_str(), "RECREATE");
