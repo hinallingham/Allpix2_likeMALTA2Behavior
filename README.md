@@ -1,4 +1,4 @@
-# Allpix2_likeMALTA2Behavior
+# Allpix2likeMALTA2Behavior
 
 [![Framework](https://img.shields.io/badge/Framework-Allpix%20Squared-blue.svg)](https://project-allpix-squared.web.cern.ch/)
 [![Data Format](https://img.shields.io/badge/Data%20Format-ROOT%20TTree%20%28MALTA2%20Native%29-orange.svg)](#-malta2-digital-encoding-logic)
