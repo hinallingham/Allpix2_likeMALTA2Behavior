@@ -14,6 +14,7 @@
 #include <TTree.h>
 
 #include <atomic>
+#include <chrono>
 #include <core/config/Configuration.hpp>
 #include <core/geometry/GeometryManager.hpp>
 #include <core/messenger/Messenger.hpp>
@@ -22,6 +23,7 @@
 #include <map>
 #include <string>
 #include <set>
+#include <vector>
 
 namespace allpix {
 /**
@@ -74,10 +76,16 @@ class Malta2TreeWriterModule : public allpix::SequentialModule {
   std::set<std::string> include_;
   std::set<std::string> exclude_;
 
+  // If set (exactly two detector names), an event is only written to any of the output
+  // trees when both listed detectors have at least one hit in that event -- simulates a
+  // coincidence trigger built from two telescope arm planes gating the readout.
+  std::vector<std::string> trigger_detectors_;
+
   std::map<std::string, std::unique_ptr<TFile>> output_files_;
   std::map<std::string, std::unique_ptr<TTree>> trees_;
 
   int run_number_{1};
+  std::chrono::steady_clock::time_point last_autosave_time_;
 
   // Current event
   uint64_t current_event_{0};

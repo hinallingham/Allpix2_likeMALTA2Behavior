@@ -13,6 +13,7 @@
 #include <objects/objects.h>
 #include <tools/ROOT.h>
 
+#include <algorithm>
 #include <core/config/ConfigReader.hpp>
 #include <fstream>
 #include <iomanip>
@@ -29,8 +30,14 @@ Malta2TreeWriterModule::Malta2TreeWriterModule(Configuration& config,
   allow_multithreading();
 
   messenger_->bindMulti<PixelHitMessage>(this, MsgFlags::IGNORE_NAME);
-  
+
   run_number_ = config_.get<int>("run_number", 1);
+
+  trigger_detectors_ = config_.getArray<std::string>("trigger_detectors", {});
+  if(!trigger_detectors_.empty() && trigger_detectors_.size() != 2) {
+    throw InvalidValueError(
+        config_, "trigger_detectors", "exactly two detector names are required to define a coincidence trigger");
+  }
 }
 
 Malta2TreeWriterModule::~Malta2TreeWriterModule() {}
@@ -45,7 +52,7 @@ void Malta2TreeWriterModule::initialize() {
       std::string det_name = detector->getName();
       
       std::ostringstream ss;
-      ss << "run_" << std::setw(6) << std::setfill('0') << run_number_ << "_" << plane_index << ".root";
+      ss << "run_" << std::setw(6) << std::setfill('0') << run_number_ << "_" << plane_index;
       
       std::string file_name = createOutputFile(ss.str(), "root", true);
       auto output_file = std::make_unique<TFile>(file_name.c_str(), "RECREATE");
@@ -76,10 +83,25 @@ void Malta2TreeWriterModule::initialize() {
       LOG(STATUS) << "Initialized output file for detector [" << det_name << "] -> " << file_name;
       plane_index++;
   }
+
+  last_autosave_time_ = std::chrono::steady_clock::now();
 }
 
 void Malta2TreeWriterModule::run(Event* event) {
     auto root_lock = root_process_lock();
+
+    // AutoSave must run before the early-return so that events with no hits
+    // still trigger periodic flushes.  Without this, a quiet beam period
+    // (few hits) can stall the online reader for many seconds.
+    auto now = std::chrono::steady_clock::now();
+    double ms_elapsed = std::chrono::duration<double, std::milli>(now - last_autosave_time_).count();
+    if(ms_elapsed >= 1000.0) {
+        for(auto& pair : trees_) {
+            output_files_[pair.first]->cd();
+            pair.second->AutoSave("SaveSelf");
+        }
+        last_autosave_time_ = now;
+    }
 
     std::vector<std::shared_ptr<PixelHitMessage>> hit_messages;
 
@@ -87,6 +109,20 @@ void Malta2TreeWriterModule::run(Event* event) {
         hit_messages = messenger_->fetchMultiMessage<PixelHitMessage>(this, event);
     } catch(const MessageNotFoundException& e) {
         return;
+    }
+
+    // Coincidence trigger: if configured, only write this event out (for all detectors) when both
+    // trigger_detectors planes have at least one hit -- mirrors a hardware trigger built from two
+    // telescope arm planes gating the readout of the whole telescope, including the planes themselves.
+    if(!trigger_detectors_.empty()) {
+        auto has_hit = [&hit_messages](const std::string& det_name) {
+            return std::any_of(hit_messages.begin(), hit_messages.end(), [&det_name](const auto& msg) {
+                return msg->getDetector()->getName() == det_name && !msg->getData().empty();
+            });
+        };
+        if(!has_hit(trigger_detectors_[0]) || !has_hit(trigger_detectors_[1])) {
+            return;
+        }
     }
 
     for(auto& msg : hit_messages) {
@@ -120,10 +156,11 @@ void Malta2TreeWriterModule::run(Event* event) {
             double remainder_3 = fmod(remainder_25, 3.125);
             phase_ = static_cast<unsigned int>(remainder_3 / 0.39);
 
-            l1id_ = static_cast<unsigned int>(event->number); 
-            run_  = static_cast<unsigned int>(run_number_);              
-            isDuplicate_ = 0;       
-            
+            l1id_  = static_cast<unsigned int>(event->number);
+            l1idC_ = static_cast<unsigned int>(event->number); // matches MaltaDAQ's non-wrapping counter
+            run_   = static_cast<unsigned int>(run_number_);
+            isDuplicate_ = 0;
+
             trees_[det_name]->Fill();
         }
     }
